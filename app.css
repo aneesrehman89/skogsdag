@@ -180,3 +180,19 @@ pre.rep{white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-si
 .step .mut{display:block}
 .top{padding-top:calc(18px + env(safe-area-inset-top))}
 .noanim .view{animation:none}
+/* v4: Find-work tabs as a sticky segmented control that always fits */
+.segw{position:sticky;top:0;z-index:4;margin:0 -16px 12px;padding:10px 16px 10px;padding-top:calc(10px + env(safe-area-inset-top));background:linear-gradient(var(--bg) 85%,rgba(243,245,241,0))}
+.seg{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#fff;border-radius:18px;padding:5px;box-shadow:var(--sh);border:1px solid rgba(6,42,31,.05)}
+.seg button{border:0;background:none;border-radius:14px;padding:8px 2px 7px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--mut);font-size:11.5px;font-weight:700;min-width:0;transition:background .15s,color .15s}
+.seg button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seg button svg{width:20px;height:20px}
+.seg button.on{background:var(--g8);color:#fff}
+.seg button.on svg{color:var(--gold)}
+.tabbody.fadein{animation:fade .22s ease}
+.lead .x .mut{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fcard .g2{align-items:end}
+#app{padding-bottom:calc(124px + env(safe-area-inset-bottom))}
+.skelbox{background:linear-gradient(90deg,#E8EDE8,#F5F7F5,#E8EDE8);background-size:200% 100%;animation:sk 1.2s infinite}
+#app{overflow:visible;overflow-x:clip}
+@keyframes fade{from{opacity:.35;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.view,.tabbody.fadein,#sheet .in{animation:none!important}}

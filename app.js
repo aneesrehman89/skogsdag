@@ -92,16 +92,21 @@ const PERS=[['today','Idag','Today'],['week','Denna vecka','This week'],['last',
 function inPer(l,p){const m=monday();return p==='today'?l.ld===today:p==='week'?l.ld>=m:p==='last'?l.ld>=addD(m,-7)&&l.ld<m:l.ld>=addD(today,-29)}
 function applyF(ls,skip){const f=S.f;return ls.filter(l=>(skip==='per'||inPer(l,f.per))&&(skip==='kom'||!f.kom||l.kom===f.kom)&&(skip==='dist'||!f.dist||l.km<=f.dist))}
 function sortF(ls){const s=S.f.sort;return [...ls].sort(s==='score'?(a,b)=>b.score-a.score:s==='big'?(a,b)=>b.ha-a.ha:s==='near'?(a,b)=>a.km-b.km:(a,b)=>b.ts-a.ts)}
-function setLeads(rows,src){leads={list:rows.map(mkLead)};leadsInfo=src;if(['leads','home','lead','pack'].includes(view))render(true)}
+function setLeads(rows,src){const first=!leads;leads={list:rows.map(mkLead)};leadsInfo=src;
+  if(view==='home'){const el=$('#homeleads');if(el)el.innerHTML=homeLeadsHtml()}
+  else if(view==='leads'&&(first||leadsBusy))render(true)
+  else if((view==='lead'||view==='pack')&&first)render(true)}
+let leadsBusy=false;
 async function loadLeads(force){
-  if(leads&&!force)return;
-  if(!leads)setLeads(SNAP.av||[],L('Sparad data från ','Saved data from ')+fmtD(SNAP.date));
+  if(leads&&!force)return;leadsBusy=!!force;
   try{const q=new URLSearchParams({where:`Lannr='25' AND Inkomdatum >= DATE '${addD(today,-31)}'`,outFields:'Kommun,Beteckn,Avverktyp,Inkomdatum,AnmaldHa,SkogsodlHa',returnGeometry:'true',outSR:'4326',maxAllowableOffset:'0.0004',geometryPrecision:'5',orderByFields:'Inkomdatum DESC',f:'json'});
     const j=await getJ(SKS+'GeodataportalVisaAvverkningsanmalan/MapServer/0/query?'+q,25000);
     if(j.features&&j.features.length){const rows=j.features.filter(x=>x.geometry&&x.geometry.rings).map(x=>{const a=x.attributes,g=x.geometry.rings.reduce((m,r)=>r.length>m.length?r:m,[]),flat=[];g.forEach(p=>flat.push(+p[1].toFixed(5),+p[0].toFixed(5)));
         return [a.Beteckn,a.Kommun.charAt(0)+a.Kommun.slice(1).toLowerCase(),a.Avverktyp,a.Inkomdatum,a.AnmaldHa||0,a.SkogsodlHa||0,g.reduce((s,p)=>s+p[1],0)/g.length,g.reduce((s,p)=>s+p[0],0)/g.length,flat]});
       setLeads(rows,L('Live från Skogsstyrelsen kl ','Live from the Swedish Forest Agency at ')+new Date().toLocaleTimeString('sv-SE',{timeZone:TZ,hour:'2-digit',minute:'2-digit'}))}
-  }catch(e){if(force)toast(L('Ingen täckning – visar sparad data','No signal – showing saved data'))}
+    else throw new Error('empty');
+  }catch(e){if(!leads)setLeads(SNAP.av||[],L('Sparad data från ','Saved data from ')+fmtD(SNAP.date));else if(force)toast(L('Ingen täckning – visar sparad data','No signal – showing saved data'))}
+  leadsBusy=false;
 }
 /* weather + ground frost (Open-Meteo, free) */
 async function wx(lat,lon){
@@ -169,12 +174,17 @@ function installCard(){if(standalone()||S.noInstall)return '';
   return ''}
 
 /* ---------- views ---------- */
+function briefHtml(w){return w?`<div class="row"><div><div class="big">${nf(w.temp)}°</div><div class="mut">${L(w.ground.sv,w.ground.en)}</div></div><button class="listen" data-a="speak">${ic('play')}${L('Lyssna','Listen')}</button></div>
+    <div class="bgrid"><div>${L('Dagsljus','Daylight')}<b>${w.rise}–${w.set} · ${w.light}</b></div><div>${L('Vindbyar / snödjup','Gusts / snow depth')}<b>${nf(w.gust)} m/s · ${w.snow} cm</b></div></div>
+    ${weekHtml(w)}<div class="mut" style="margin-top:8px">${L('7 dagar: grön = bra arbetsdag, gul = var försiktig, röd = stå still','7 days: green = good working day, yellow = take care, red = stand still')}</div>`:`<div class="skel" style="width:40%;opacity:.3"></div><div class="skel" style="opacity:.3"></div><div class="skel" style="width:70%;opacity:.3"></div>`}
+function homeLeadsHtml(){const ls=leads?nearLeads():null;if(!ls)return `<div class="sum">${'<div><div class="skel" style="margin:6px auto;width:50%"></div><div class="skel" style="margin:6px auto;width:70%"></div></div>'.repeat(3)}</div><div class="card"><div class="skel"></div><div class="skel" style="width:60%"></div></div>`;
+  return `<div class="sum"><div><b>${ls.filter(l=>l.ld===today).length}</b><span>${L('nya idag','new today')}</span></div><div><b>${ls.filter(l=>l.ld>=monday()).length}</b><span>${L('denna vecka','this week')}</span></div><div><b>${buildPacks(ls).length}</b><span>${L('jobbpaket','job packages')}</span></div></div>${[...ls].sort((a,b)=>b.score-a.score).slice(0,2).map(leadRow).join('')}`}
 function vHome(){
   const m=monthTotals(today.slice(0,7)),hr=sHour(),gr=hr<5?L('God natt','Good night'):hr<10?L('God morgon','Good morning'):hr<18?L('Hej','Hello'):L('God kväll','Good evening');
-  const ls=leads?nearLeads():null,packs=ls?buildPacks(ls):[],due=S.contacts.filter(c=>c.follow&&c.follow<=today&&c.status!=='vun'&&c.status!=='forl'),act=S.jobs.filter(j=>!j.done);
+  const due=S.contacts.filter(c=>c.follow&&c.follow<=today&&c.status!=='vun'&&c.status!=='forl'),act=S.jobs.filter(j=>!j.done);
   const svc=S.machines.map(x=>({...x,left:x.last+x.every-x.hours})).filter(x=>x.left<=60);
   const w=WX[S.home.lat.toFixed(1)+','+S.home.lon.toFixed(1)];
-  if(!w)wx(S.home.lat,S.home.lon).then(()=>{if(view==='home')render(true)}).catch(()=>{});
+  if(!w)wx(S.home.lat,S.home.lon).then(nw=>{const el=$('#brief');if(view==='home'&&el)el.innerHTML=briefHtml(nw)}).catch(()=>{const el=$('#brief');if(el)el.innerHTML=`<div class="mut">${L('Vädret kunde inte hämtas – kontrollera täckningen.','Weather could not be loaded – check your signal.')}</div>`});
   return `<div class="top"><div class="trow"><div class="who"><div class="ava">${esc((S.co.person||'L F').split(' ').map(x=>x[0]).join('').slice(0,2))}</div><div><small>${gr}</small><b>${esc((S.co.person||'Lars').split(' ')[0])}</b></div></div>
    <div style="display:flex;gap:8px"><button class="tbtn" data-a="lang">${lang==='sv'?'EN':'SV'}</button><button class="tbtn" data-a="settings" aria-label="${L('Inställningar','Settings')}">${ic('set')}</button></div></div>
    <div class="bal"><div class="row" style="align-items:flex-end"><div><div class="l">${L('Intjänat denna månad','Earned this month')} <button class="eye" data-a="hide" aria-label="${L('Dölj belopp','Hide amounts')}">${ic('eye')}</button></div>
@@ -182,15 +192,13 @@ function vHome(){
    <div class="chips"><span class="chip">${L('Vinst','Profit')} <b>${S.hide?'•••':kr(m.profit)}</b></span><span class="chip"><b>${nf(m.hours,1)}</b> h</span><span class="chip"><b>${nf(m.m3)}</b> m³</span></div></div></div>
   <div class="sheetbody">
    <div class="qa"><button data-go="leads"><span class="ic gold">${ic('leads')}</span>${L('Hitta jobb','Find work')}</button><button data-go="calc"><span class="ic">${ic('calc')}</span>${L('Kalkyl','Calculator')}</button><button data-go="log"><span class="ic">${ic('log')}</span>${L('Dagbok','Day log')}</button><button data-a="report"><span class="ic dark">${ic('rep')}</span>${L('Rapport','Report')}</button></div>
-   <div style="height:14px"></div>${installCard()}
+   <div style="height:14px"></div><div id="inst">${installCard()}</div>
    ${S.demo?`<div class="banner">${L('Exempeldata visas så att du ser hur appen fungerar.','Sample data is shown so you can see how the app works.')} <b data-a="cleardemo" style="text-decoration:underline;cursor:pointer">${L('Börja från noll','Start from zero')}</b></div>`:''}
    <h2>${L('Dagens läge','Today\'s outlook')}<span class="mut" style="font-weight:600">${esc(S.home.name)}</span></h2>
-   <div class="card brief">${w?`<div class="row"><div><div class="big">${nf(w.temp)}°</div><div class="mut">${L(w.ground.sv,w.ground.en)}</div></div><button class="listen" data-a="speak">${ic('play')}${L('Lyssna','Listen')}</button></div>
-    <div class="bgrid"><div>${L('Dagsljus','Daylight')}<b>${w.rise}–${w.set} · ${w.light}</b></div><div>${L('Vindbyar / snödjup','Gusts / snow depth')}<b>${nf(w.gust)} m/s · ${w.snow} cm</b></div></div>
-    ${weekHtml(w)}<div class="mut" style="margin-top:8px">${L('7 dagar: grön = bra arbetsdag, gul = var försiktig, röd = stå still','7 days: green = good working day, yellow = take care, red = stand still')}</div>`:`<div class="skel" style="width:40%;opacity:.3"></div><div class="skel" style="opacity:.3"></div><div class="skel" style="width:70%;opacity:.3"></div>`}</div>
+   <div class="card brief" id="brief">${briefHtml(w)}</div>
    ${svc.map(x=>`<div class="card tap" data-a="machines"><div class="lead"><div class="dot ${x.left<=20?'r':'a'}">${ic('warn')}</div><div class="x"><h3>${esc(x.name)}: ${L('service om','service in')} ${nf(Math.max(0,x.left))} h</h3><div class="mut">${L('Boka nu – ett planerat stopp är billigare än ett haveri','Book now – a planned stop is cheaper than a breakdown')}</div></div></div></div>`).join('')}
    <h2>${L('Nya jobb nära dig','New work near you')}<span class="lnk" data-go="leads">${L('Visa alla','See all')}</span></h2>
-   ${ls?`<div class="sum"><div><b>${ls.filter(l=>l.ld===today).length}</b><span>${L('nya idag','new today')}</span></div><div><b>${ls.filter(l=>l.ld>=monday()).length}</b><span>${L('denna vecka','this week')}</span></div><div><b>${packs.length}</b><span>${L('jobbpaket','job packages')}</span></div></div>${[...ls].sort((a,b)=>b.score-a.score).slice(0,2).map(leadRow).join('')}`:`<div class="card"><div class="skel"></div><div class="skel" style="width:60%"></div></div>`}
+   <div id="homeleads">${homeLeadsHtml()}</div>
    ${due.length?`<h2>${L('Ring idag','Call today')}</h2>`+due.map(c=>`<div class="card tap" data-a="contact" data-id="${c.id}"><div class="row"><h3>${esc(c.name)}</h3><span class="pill red">${fmtD(c.follow)}</span></div><div class="note">${esc(((c.notes[0]||{}).t||'').slice(0,120))}</div></div>`).join(''):''}
    <h2>${L('Pågående jobb','Active jobs')}</h2>
    ${act.length?act.map(jobCard).join(''):`<div class="card mut">${L('Inga jobb ännu. Räkna på ett jobb i Kalkyl och spara det.','No jobs yet. Price a job in the calculator and save it.')}</div>`}
@@ -201,12 +209,16 @@ function filterCard(){
   if(f.kom&&!koms[f.kom])koms[f.kom]=0;
   return `<div class="card fcard"><div class="fchips">${PERS.map(p=>{const n=pc.filter(l=>inPer(l,p[0])).length;return `<button class="fchip ${f.per===p[0]?'on':''}" data-a="fper" data-v="${p[0]}">${L(p[1],p[2])}<em>${n}</em></button>`}).join('')}</div>
   <label>${L('Kommun','Municipality')}</label><select data-c="fkom"><option value="">${L('Alla kommuner','All municipalities')} (${kc.length})</option>${Object.keys(koms).sort((a,b)=>a.localeCompare(b,'sv')).map(k=>`<option value="${esc(k)}" ${k===f.kom?'selected':''}>${esc(k)} (${koms[k]})</option>`).join('')}</select>
-  <div class="g2"><div><label>${L('Avstånd från ','Distance from ')+esc(S.home.name)}</label><select data-c="fdist">${[[0,L('Alla avstånd','Any distance')],[25,'≤ 25 km'],[50,'≤ 50 km'],[100,'≤ 100 km'],[150,'≤ 150 km']].map(o=>`<option value="${o[0]}" ${+f.dist===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
+  <div class="g2"><div><label>${L('Avstånd','Distance')}</label><select data-c="fdist">${[[0,L('Alla','Any')],[25,'≤ 25 km'],[50,'≤ 50 km'],[100,'≤ 100 km'],[150,'≤ 150 km']].map(o=>`<option value="${o[0]}" ${+f.dist===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
   <div><label>${L('Sortera','Sort')}</label><select data-c="fsort">${[['new',L('Nyast','Newest')],['score',L('Bäst match','Best match')],['big',L('Störst','Largest')],['near',L('Närmast','Nearest')]].map(o=>`<option value="${o[0]}" ${f.sort===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div></div></div>`}
 const NU={SE332:'Norrbotten',SE331:'Västerbotten',SE322:'Jämtland',SE321:'Västernorrland',SE313:'Gävleborg',SE312:'Dalarna',SE311:'Värmland',SE110:'Stockholm',SE121:'Uppsala',SE122:'Södermanland',SE123:'Östergötland',SE124:'Örebro',SE125:'Västmanland',SE211:'Jönköping',SE212:'Kronoberg',SE213:'Kalmar',SE214:'Gotland',SE221:'Blekinge',SE224:'Skåne',SE231:'Halland',SE232:'Västra Götaland'};
 const tenders=()=>(SNAP.ted||[]).filter(t=>t.dl>=today).map(t=>({...t,north:t.reg.some(r=>r==='SE332'||r==='SE331')})).sort((a,b)=>(b.north-a.north)||a.dl.localeCompare(b.dl));
+const TABY={};
+function switchTab(t){if(t===leadTab){const mk=$('#segmark');if(mk&&scrollY>mk.offsetTop)window.scrollTo({top:mk.offsetTop,behavior:'smooth'});return}
+  TABY[leadTab]=scrollY;leadTab=t;shown=40;render(true);const mk=$('#segmark'),top=mk?mk.offsetTop:0;
+  window.scrollTo(0,TABY[t]!=null&&TABY[t]>top?TABY[t]:Math.min(scrollY,top))}
 function vLeads(){
-  const tabs=[['av',L('Avverkningar','Fellings')],['pack',L('Jobbpaket','Packages')],['ut',L('Skogsvård','Replanting')],['map',L('Karta','Map')],['ted',L('Upphandlingar','Tenders')]];
+  const tabs=[['av',L('Anmälda','Fellings'),'leads'],['pack',L('Paket','Packages'),'cog'],['ut',L('Plantera','Replant'),'tree'],['map',L('Karta','Map'),'map'],['ted',L('Anbud','Tenders'),'doc']];
   let body='';
   if(!leads&&leadTab!=='ted'&&leadTab!=='ut'){body=`<div class="card"><div class="skel"></div><div class="skel" style="width:60%"></div></div>`.repeat(3)}
   else if(leadTab==='av'){const ls=sortF(applyF(allLeads())),ha=ls.reduce((a,l)=>a+l.ha,0);
@@ -223,10 +235,12 @@ function vLeads(){
   else{const ts=tenders();
     body=`<div class="card mut">${L('Offentliga upphandlingar av skogstjänster i Sverige som går att lämna anbud på. Uppdaterad ','Open public tenders for forestry services in Sweden. Updated ')+fmtD(SNAP.date)}.</div>`+(ts.length?ts.map(t=>`<div class="card tap" data-a="tender" data-id="${t.id}"><div class="row"><h3>${esc(t.t)}</h3><span class="chev">${ic('chev')}</span></div><div class="mut" style="margin-top:4px">${esc(t.b)} · ${t.reg.length>3?(t.north?'Norrbotten + ':'')+t.reg.length+' '+L('län','regions'):t.reg.map(r=>NU[r]).filter(Boolean).join(', ')||L('Sverige','Sweden')}</div>
     <div class="tags">${t.north?`<span class="pill">${L('Norr','North')}</span>`:''}<span class="pill gold">${L('Sista dag','Deadline')} ${fmtD(t.dl)}</span></div></div>`).join(''):`<div class="card mut">${L('Inga öppna upphandlingar just nu.','No open tenders right now.')}</div>`)}
-  return hdr(L('Hitta jobb','Find work'),L('Jobben kommer till dig – du behöver inte leta','The work comes to you – no searching'))+`<div class="pad view"><div class="scroller">${tabs.map(t=>`<button class="tab ${leadTab===t[0]?'on':''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>${body}</div>`;
+  return hdr(L('Hitta jobb','Find work'),L('Jobben kommer till dig – du behöver inte leta','The work comes to you – no searching'))+`<div class="pad view"><div id="segmark"></div><div class="segw" id="segw"><div class="seg">${tabs.map(t=>`<button class="${leadTab===t[0]?'on':''}" data-tab="${t[0]}" aria-pressed="${leadTab===t[0]}">${ic(t[2])}<span>${t[1]}</span></button>`).join('')}</div></div><div id="tabbody" class="tabbody">${body}</div></div>`;
 }
 function findLead(id){if(!id)return null;if(id[0]==='U'){const r=(SNAP.ut||[]).find(x=>x[0]===id);return r?utLead(r):null}return allLeads().find(x=>x.id===id)||null}
+const loadingPage=k=>dhdr(k,L('Laddar…','Loading…'))+`<div class="pad view"><div class="minimap skelbox"></div><div class="tiles">${'<div class="tl"><div class="skel" style="width:60%"></div><div class="skel"></div></div>'.repeat(4)}</div></div>`;
 function vLead(){
+  if(!leads&&param[0]!=='U')return loadingPage(L('Jobbtips','Lead'));
   const l=findLead(param);
   if(!l)return dhdr(L('Jobbtips','Lead'),L('Hittades inte','Not found'))+`<div class="pad view"><div class="card mut">${leads?L('Det här ärendet finns inte längre bland de senaste 30 dagarnas anmälningar.','This case is no longer among the last 30 days of notifications.'):L('Laddar…','Loading…')}</div></div>`;
   const saved=S.contacts.find(c=>c.ref===l.id),[N,E]=sweref(l.lat,l.lon),wgs=l.lat.toFixed(5)+', '+l.lon.toFixed(5);
@@ -261,7 +275,7 @@ function fillLead(){const l=findLead(param);if(!l)return;polyMap('lmap',[l]);
     ${bad.length?bad.slice(0,3).map(d=>`<div class="mut" style="margin-top:6px">${new Date(dUTC(d.t)).toLocaleDateString(loc(),{timeZone:'UTC',weekday:'long'})}: ${esc(L(d.why[0],d.why[1]))}</div>`).join(''):`<div class="mut" style="margin-top:6px">${L('Sju bra arbetsdagar framåt.','Seven good working days ahead.')}</div>`}
     <div class="mut" style="margin-top:8px">${L('Marktemperatur från väderprognosmodell – kontrollera alltid bärigheten på plats.','Ground temperature from a weather model – always check bearing capacity on site.')}</div>`}).catch(()=>{const el=$('#lwx');if(el)el.innerHTML=`<div class="mut">${L('Kunde inte hämta väder just nu.','Could not fetch weather right now.')}</div>`});
 }
-function vPack(){const p=leads&&buildPacks(nearLeads()).find(x=>x.id===param);
+function vPack(){if(!leads)return loadingPage(L('Jobbpaket','Job package'));const p=buildPacks(nearLeads()).find(x=>x.id===param);
   if(!p)return dhdr(L('Jobbpaket','Job package'),L('Hittades inte','Not found'))+`<div class="pad view"><div class="card mut">${leads?L('Paketet finns inte längre.','The package no longer exists.'):L('Laddar…','Loading…')}</div></div>`;
   return dhdr(L('Jobbpaket','Job package'),`${p.items.length} ${L('trakter','sites')} · ${nf(p.ha,1)} ha`)+`<div class="pad view"><div id="pmap" class="minimap"></div>
   <div class="sum"><div><b>${nf(p.ha*S.m3ha)}</b><span>m³</span></div><div><b>${nf(p.val/1e3)}</b><span>${L('tkr drivning','k SEK harvest')}</span></div><div><b>${nf(p.saved/1e3,1)}</b><span>${L('tkr sparad flytt','k SEK moves saved')}</span></div></div>
@@ -431,7 +445,7 @@ async function copy(t){try{await navigator.clipboard.writeText(t)}catch(e){const
 const val=id=>(document.getElementById(id)||{}).value||'';
 document.addEventListener('click',async e=>{
   if(e.target.id==='sheet'){closeSheet();return}
-  const tb=e.target.closest('[data-tab]');if(tb){leadTab=tb.dataset.tab;shown=40;render(true);return}
+  const tb=e.target.closest('[data-tab]');if(tb){switchTab(tb.dataset.tab);return}
   const el=e.target.closest('[data-a]'),gt=e.target.closest('[data-go]');
   if(!el&&gt){const h='#/'+gt.dataset.go;if(sheetOpen())closeSheet(()=>go(h));else if(location.hash===h)window.scrollTo({top:0,behavior:'smooth'});else go(h);return}
   if(!el)return;const a=el.dataset.a,id=el.dataset.id;
@@ -441,8 +455,8 @@ document.addEventListener('click',async e=>{
   else if(a==='hide'){S.hide=!S.hide;save();render(true)}
   else if(a==='speak')speak();
   else if(a==='copy')copy(el.dataset.v);
-  else if(a==='install'){if(installEvt){installEvt.prompt();const r=await installEvt.userChoice;installEvt=null;if(r&&r.outcome==='accepted')toast(L('Appen installeras','Installing the app'));render(true)}}
-  else if(a==='noinst'){S.noInstall=true;save();render(true)}
+  else if(a==='install'){if(installEvt){installEvt.prompt();const r=await installEvt.userChoice;installEvt=null;if(r&&r.outcome==='accepted')toast(L('Appen installeras','Installing the app'));instUpd()}}
+  else if(a==='noinst'){S.noInstall=true;save();instUpd()}
   else if(a==='cleardemo'){if(confirm(L('Radera all data och börja från noll?','Erase all data and start from zero?'))){S.jobs=[];S.logs=[];S.contacts=[];S.machines=[];S.demo=false;save();closeSheet(()=>render(true))}}
   else if(a==='reload'){toast(L('Hämtar…','Loading…'));loadLeads(true)}
   else if(a==='more'){shown+=40;render(true)}
@@ -498,8 +512,9 @@ document.addEventListener('change',e=>{const c=e.target.dataset.c;
   else if(c==='fsort'){S.f.sort=e.target.value;save();render(true)}
   else if(c==='ctype'){calcInit(e.target.value,{name:C.name,km:C.km,cust:C.cust});render(true)}
   else if(e.target.id==='rp-m'){repYm=e.target.value||repYm;render(true)}});
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;if(view==='home')render(true)});
-window.addEventListener('appinstalled',()=>{installEvt=null;S.noInstall=true;save();if(view==='home')render(true)});
+const instUpd=()=>{const el=$('#inst');if(el)el.innerHTML=installCard()};
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;instUpd()});
+window.addEventListener('appinstalled',()=>{installEvt=null;S.noInstall=true;save();instUpd()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&iso()!==today){today=iso();if(leads)leads.list=leads.list.map(l=>mkLead([l.id,l.kom,l.typ,l.ts,l.ha,l.plant,l.lat,l.lon,l.ring]));render(true)}});
 history.replaceState({d:0},'',location.hash||'#/home');route(false);loadLeads();
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(()=>{});
