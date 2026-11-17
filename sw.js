@@ -1,5 +1,5 @@
 // Offline support: app files are cached; network first so updates arrive, cached copy when there is no signal.
-const CACHE = 'skogsdag-v5';
+const CACHE = 'skogsdag-v6';
 const FILES = ['./', 'index.html', 'app.css', 'app.js', 'data.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png', 'icon-maskable-512.png',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/fonts/jakarta-latin.woff2', 'vendor/images/layers.png', 'vendor/images/marker-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
@@ -12,6 +12,6 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (u.origin !== location.origin) return;
-  e.respondWith(fetch(e.request).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; })
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; })
     .catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
 });
