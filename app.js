@@ -92,21 +92,26 @@ const PERS=[['today','Idag','Today'],['week','Denna vecka','This week'],['last',
 function inPer(l,p){const m=monday();return p==='today'?l.ld===today:p==='week'?l.ld>=m:p==='last'?l.ld>=addD(m,-7)&&l.ld<m:l.ld>=addD(today,-29)}
 function applyF(ls,skip){const f=S.f;return ls.filter(l=>(skip==='per'||inPer(l,f.per))&&(skip==='kom'||!f.kom||l.kom===f.kom)&&(skip==='dist'||!f.dist||l.km<=f.dist))}
 function sortF(ls){const s=S.f.sort;return [...ls].sort(s==='score'?(a,b)=>b.score-a.score:s==='big'?(a,b)=>b.ha-a.ha:s==='near'?(a,b)=>a.km-b.km:(a,b)=>b.ts-a.ts)}
-function setLeads(rows,src){const first=!leads;leads={list:rows.map(mkLead)};leadsInfo=src;
+let pendingLive=null,leadsBusy=false,liveDone=false;
+function setLeads(rows,src){const first=!leads;
+  if(!first&&!leadsBusy&&view==='leads'&&leadTab!=='ut'&&leadTab!=='ted'){pendingLive={rows,src};const el=$('#liveinfo');if(el)el.innerHTML=liveInfoHtml();return}
+  pendingLive=null;leads={list:rows.map(mkLead)};leadsInfo=src;
   if(view==='home'){const el=$('#homeleads');if(el)el.innerHTML=homeLeadsHtml()}
   else if(view==='leads'&&(first||leadsBusy))render(true)
-  else if((view==='lead'||view==='pack')&&first)render(true)}
-let leadsBusy=false;
+  else if((view==='lead'||view==='pack')&&(first||(!$('#lmap')&&!$('#pmap'))))render(true)}
+function applyLive(){if(!pendingLive)return;const p=pendingLive;pendingLive=null;leads={list:p.rows.map(mkLead)};leadsInfo=p.src;render(true)}
+const liveInfoHtml=()=>pendingLive?`<button class="livebtn" data-a="applylive">${ic('dl')}${L('Nya uppgifter från Skogsstyrelsen – visa','Fresh data from the Forest Agency – show')}</button>`:`${esc(leadsInfo)} · <span data-a="reload" class="lnk2">${L('Uppdatera','Refresh')}</span>`;
 async function loadLeads(force){
   if(leads&&!force)return;leadsBusy=!!force;
+  if(!leads)setLeads(SNAP.av||[],L('Sparad data från ','Saved data from ')+fmtD(SNAP.date)+L(' – hämtar nytt…',' – fetching new…'));
   try{const q=new URLSearchParams({where:`Lannr='25' AND Inkomdatum >= DATE '${addD(today,-31)}'`,outFields:'Kommun,Beteckn,Avverktyp,Inkomdatum,AnmaldHa,SkogsodlHa',returnGeometry:'true',outSR:'4326',maxAllowableOffset:'0.0004',geometryPrecision:'5',orderByFields:'Inkomdatum DESC',f:'json'});
     const j=await getJ(SKS+'GeodataportalVisaAvverkningsanmalan/MapServer/0/query?'+q,25000);
     if(j.features&&j.features.length){const rows=j.features.filter(x=>x.geometry&&x.geometry.rings).map(x=>{const a=x.attributes,g=x.geometry.rings.reduce((m,r)=>r.length>m.length?r:m,[]),flat=[];g.forEach(p=>flat.push(+p[1].toFixed(5),+p[0].toFixed(5)));
         return [a.Beteckn,a.Kommun.charAt(0)+a.Kommun.slice(1).toLowerCase(),a.Avverktyp,a.Inkomdatum,a.AnmaldHa||0,a.SkogsodlHa||0,g.reduce((s,p)=>s+p[1],0)/g.length,g.reduce((s,p)=>s+p[0],0)/g.length,flat]});
       setLeads(rows,L('Live från Skogsstyrelsen kl ','Live from the Swedish Forest Agency at ')+new Date().toLocaleTimeString('sv-SE',{timeZone:TZ,hour:'2-digit',minute:'2-digit'}))}
     else throw new Error('empty');
-  }catch(e){if(!leads)setLeads(SNAP.av||[],L('Sparad data från ','Saved data from ')+fmtD(SNAP.date));else if(force)toast(L('Ingen täckning – visar sparad data','No signal – showing saved data'))}
-  leadsBusy=false;
+  }catch(e){leadsInfo=L('Sparad data från ','Saved data from ')+fmtD(SNAP.date);const el=$('#liveinfo');if(el)el.innerHTML=liveInfoHtml();if(force)toast(L('Ingen täckning – visar sparad data','No signal – showing saved data'))}
+  leadsBusy=false;if(!liveDone){liveDone=true;if((view==='lead'||view==='pack')&&!$('#lmap')&&!$('#pmap'))render(true)}
 }
 /* weather + ground frost (Open-Meteo, free) */
 async function wx(lat,lon){
@@ -223,7 +228,7 @@ function vLeads(){
   if(!leads&&leadTab!=='ted'&&leadTab!=='ut'){body=`<div class="card"><div class="skel"></div><div class="skel" style="width:60%"></div></div>`.repeat(3)}
   else if(leadTab==='av'){const ls=sortF(applyF(allLeads())),ha=ls.reduce((a,l)=>a+l.ha,0);
     body=filterCard()+`<div class="sum"><div><b>${ls.length}</b><span>${L('jobbtips','leads')}</span></div><div><b>${nf(ha)}</b><span>ha</span></div><div><b>${nf(ha*S.m3ha*TYPES.avv.price/1e6,1)}</b><span>${L('Mkr i arbete','M SEK of work')}</span></div></div>
-    <div class="mut" style="margin:0 4px 12px">${esc(leadsInfo)} · <span data-a="reload" class="lnk2">${L('Uppdatera','Refresh')}</span></div>`+
+    <div class="mut" id="liveinfo" style="margin:0 4px 12px">${liveInfoHtml()}</div>`+
     (ls.length?ls.slice(0,shown).map(leadRow).join('')+(ls.length>shown?`<button class="b w" data-a="more">${L('Visa fler','Show more')} (${ls.length-shown})</button>`:''):`<div class="card mut">${L('Inga avverkningar matchar filtret. Prova en längre period eller ett större avstånd.','No fellings match the filter. Try a longer period or a larger distance.')}</div>`)}
   else if(leadTab==='pack'){const ps=buildPacks(nearLeads());
     body=`<div class="card mut">${L(`Avverkningar inom 6 km från varandra, inom ${S.radius} km från ${esc(S.home.name)}. En maskinflytt, flera jobb – så blir även små trakter lönsamma.`,`Fellings within 6 km of each other, within ${S.radius} km of ${esc(S.home.name)}. One machine move, several jobs – so even small sites become profitable.`)}</div>`+(ps.length?ps.slice(0,25).map(p=>`<div class="card tap" data-a="pack" data-id="${esc(p.id)}"><div class="row"><div><h3>${p.items.length} ${L('trakter','sites')} · ${nf(p.ha,1)} ha</h3><div class="mut">${esc(p.kom)} · ${nf(p.km)} km · ≈ ${nf(p.val/1e3)} tkr</div></div><span class="chev">${ic('chev')}</span></div>
@@ -240,8 +245,8 @@ function vLeads(){
 function findLead(id){if(!id)return null;if(id[0]==='U'){const r=(SNAP.ut||[]).find(x=>x[0]===id);return r?utLead(r):null}return allLeads().find(x=>x.id===id)||null}
 const loadingPage=k=>dhdr(k,L('Laddar…','Loading…'))+`<div class="pad view"><div class="minimap skelbox"></div><div class="tiles">${'<div class="tl"><div class="skel" style="width:60%"></div><div class="skel"></div></div>'.repeat(4)}</div></div>`;
 function vLead(){
-  if(!leads&&param[0]!=='U')return loadingPage(L('Jobbtips','Lead'));
   const l=findLead(param);
+  if(!l&&param[0]!=='U'&&!liveDone)return loadingPage(L('Jobbtips','Lead'));
   if(!l)return dhdr(L('Jobbtips','Lead'),L('Hittades inte','Not found'))+`<div class="pad view"><div class="card mut">${leads?L('Det här ärendet finns inte längre bland de senaste 30 dagarnas anmälningar.','This case is no longer among the last 30 days of notifications.'):L('Laddar…','Loading…')}</div></div>`;
   const saved=S.contacts.find(c=>c.ref===l.id),[N,E]=sweref(l.lat,l.lon),wgs=l.lat.toFixed(5)+', '+l.lon.toFixed(5);
   const tl=l.k==='av'?[tile(L('Anmäld areal','Notified area'),nf(l.ha,1)+' ha'),tile(L('Inkom till Skogsstyrelsen','Received by the agency'),fmtD(l.ts)),tile(L('Tidigast avverkning','Earliest felling date'),l.free<=Date.now()?L('Nu','Now'):fmtD(l.free)),tile(L('Ska planteras','To be replanted'),l.plant?nf(l.plant,1)+' ha':'–'),tile(L('Fågelvägen','Straight-line distance'),nf(l.km)+' km '+L('från ','from ')+esc(S.home.name)),tile(L('Ärendenummer','Case number'),esc(l.id))]
@@ -275,8 +280,8 @@ function fillLead(){const l=findLead(param);if(!l)return;polyMap('lmap',[l]);
     ${bad.length?bad.slice(0,3).map(d=>`<div class="mut" style="margin-top:6px">${new Date(dUTC(d.t)).toLocaleDateString(loc(),{timeZone:'UTC',weekday:'long'})}: ${esc(L(d.why[0],d.why[1]))}</div>`).join(''):`<div class="mut" style="margin-top:6px">${L('Sju bra arbetsdagar framåt.','Seven good working days ahead.')}</div>`}
     <div class="mut" style="margin-top:8px">${L('Marktemperatur från väderprognosmodell – kontrollera alltid bärigheten på plats.','Ground temperature from a weather model – always check bearing capacity on site.')}</div>`}).catch(()=>{const el=$('#lwx');if(el)el.innerHTML=`<div class="mut">${L('Kunde inte hämta väder just nu.','Could not fetch weather right now.')}</div>`});
 }
-function vPack(){if(!leads)return loadingPage(L('Jobbpaket','Job package'));const p=buildPacks(nearLeads()).find(x=>x.id===param);
-  if(!p)return dhdr(L('Jobbpaket','Job package'),L('Hittades inte','Not found'))+`<div class="pad view"><div class="card mut">${leads?L('Paketet finns inte längre.','The package no longer exists.'):L('Laddar…','Loading…')}</div></div>`;
+function vPack(){const p=leads&&buildPacks(nearLeads()).find(x=>x.id===param);
+  if(!p&&!liveDone)return loadingPage(L('Jobbpaket','Job package'));if(!p)return dhdr(L('Jobbpaket','Job package'),L('Hittades inte','Not found'))+`<div class="pad view"><div class="card mut">${leads?L('Paketet finns inte längre.','The package no longer exists.'):L('Laddar…','Loading…')}</div></div>`;
   return dhdr(L('Jobbpaket','Job package'),`${p.items.length} ${L('trakter','sites')} · ${nf(p.ha,1)} ha`)+`<div class="pad view"><div id="pmap" class="minimap"></div>
   <div class="sum"><div><b>${nf(p.ha*S.m3ha)}</b><span>m³</span></div><div><b>${nf(p.val/1e3)}</b><span>${L('tkr drivning','k SEK harvest')}</span></div><div><b>${nf(p.saved/1e3,1)}</b><span>${L('tkr sparad flytt','k SEK moves saved')}</span></div></div>
   <div class="card mut">${L(`${esc(p.kom)}, ${nf(p.km)} km från ${esc(S.home.name)}. En flytt i stället för ${p.items.length}. Ring samma köpare eller grannarna och erbjud ett paketpris.`,`${esc(p.kom)}, ${nf(p.km)} km from ${esc(S.home.name)}. One move instead of ${p.items.length}. Call the same buyer or the neighbours and offer a package price.`)}</div>
@@ -423,7 +428,7 @@ function parse(){const h=(location.hash||'#/home').replace(/^#\/?/,'').split('/'
   if(!TABS.includes(v)&&!PARENT[v])v='home';return [v,p]}
 function go(h){if(location.hash===h)return;SCROLL[location.hash]=scrollY;history.pushState({d:(history.state&&history.state.d||0)+1},'',h);route(false)}
 function back(){const st=history.state;if(st&&st.d>0)history.back();else{history.replaceState({d:0},'',PARENT[view]||'#/home');route(false)}}
-function route(restore){today=iso();[view,param]=parse();render(false);
+function route(restore){today=iso();[view,param]=parse();if(pendingLive&&view!=='leads'){leads={list:pendingLive.rows.map(mkLead)};leadsInfo=pendingLive.src;pendingLive=null}render(false);
   window.scrollTo(0,restore&&SCROLL[location.hash]!=null?SCROLL[location.hash]:0)}
 window.addEventListener('popstate',()=>{
   if(sheetPushed){sheetPushed=false;hideSheet();const f=afterClose;afterClose=null;if(f)f();return}
@@ -458,6 +463,7 @@ document.addEventListener('click',async e=>{
   else if(a==='install'){if(installEvt){installEvt.prompt();const r=await installEvt.userChoice;installEvt=null;if(r&&r.outcome==='accepted')toast(L('Appen installeras','Installing the app'));instUpd()}}
   else if(a==='noinst'){S.noInstall=true;save();instUpd()}
   else if(a==='cleardemo'){if(confirm(L('Radera all data och börja från noll?','Erase all data and start from zero?'))){S.jobs=[];S.logs=[];S.contacts=[];S.machines=[];S.demo=false;save();closeSheet(()=>render(true))}}
+  else if(a==='applylive')applyLive();
   else if(a==='reload'){toast(L('Hämtar…','Loading…'));loadLeads(true)}
   else if(a==='more'){shown+=40;render(true)}
   else if(a==='fper'){S.f.per=el.dataset.v;shown=40;save();render(true)}
